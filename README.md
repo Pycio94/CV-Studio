@@ -47,10 +47,10 @@ fonts. Original source files are not changed by importing them.
 ### Original CV HTML
 
 Choose **Choose original CV HTML** under **Start with your existing CV**.
-Select the original `index.html` in the repository root, one level above
-`app`. The importer recognizes the original CV's HTML structure; it is not a
-general-purpose HTML importer. It creates a separate CV and leaves the source
-file unchanged. The original portrait is not imported automatically.
+Select the repository-root `index.html`. The importer recognizes the
+original CV's HTML structure; it is not a general-purpose HTML importer. It
+creates a separate CV and leaves the source file unchanged. The original
+portrait is not imported automatically.
 
 ### PDF
 
@@ -138,9 +138,10 @@ browser storage is scoped to the origin and browser profile.
 
 ## Build and test
 
-Run these commands from `app`:
+From the repository root, run these commands in PowerShell:
 
 ```powershell
+Set-Location .\app
 npm run build
 npm test
 npm run test:e2e
@@ -158,10 +159,11 @@ expose the Vite development server as a permanent LAN service.
 
 1. Install Caddy for Windows and make `caddy` available on `PATH`.
 2. Reserve the host PC's LAN IPv4 address in the router.
-3. From the `app` directory, set `CV_STUDIO_HOST` to that reserved address
+3. From the repository root, set `CV_STUDIO_HOST` to that reserved address
    and start the server:
 
    ```powershell
+   Set-Location .\app
    $env:CV_STUDIO_HOST = "192.168.0.100"
    npm run start:lan
    ```
@@ -190,14 +192,14 @@ of a hosted copy is not guaranteed.
 
 ## Project structure
 
-- `src\App.vue` - editor state, autosave, document operations, imports,
+- `app\src\App.vue` - editor state, autosave, document operations, imports,
   exports, and print actions.
-- `src\model.ts` - CV document schema, validation, defaults, and helpers.
-- `src\storage.ts` - IndexedDB persistence and JSON backup validation.
-- `src\legacy.ts` - importer for the original CV HTML.
-- `src\pdfImport.ts` and `src\pdfParser.ts` - local PDF text extraction and
-  section mapping.
-- `src\CvPreview.vue` - shared CV markup for the three layouts.
-- `src\ClassicPrint.vue` - A4 pagination for Classic and Timeline.
-- `src\style.css` - screen, layout, and print styles.
-- `src\*.test.ts` and `tests\editor.spec.ts` - unit and browser tests.
+- `app\src\model.ts` - CV document schema, validation, defaults, and helpers.
+- `app\src\storage.ts` - IndexedDB persistence and JSON backup validation.
+- `app\src\legacy.ts` - importer for the original CV HTML.
+- `app\src\pdfImport.ts` and `app\src\pdfParser.ts` - local PDF text extraction
+  and section mapping.
+- `app\src\CvPreview.vue` - shared CV markup for the three layouts.
+- `app\src\ClassicPrint.vue` - A4 pagination for Classic and Timeline.
+- `app\src\style.css` - screen, layout, and print styles.
+- `app\src\*.test.ts` and `app\tests\editor.spec.ts` - unit and browser tests.
