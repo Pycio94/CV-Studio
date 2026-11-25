@@ -1,10 +1,17 @@
 <script setup lang="ts">
-import { safeUrl, type CvDocument, type Item } from './model'
+import { computed } from 'vue'
+import CvExperienceList from './components/CvExperienceList.vue'
+import CvItemList from './components/CvItemList.vue'
+import { getLayout } from './layouts'
+import { safeUrl, type CvDocument } from './model'
 
-defineProps<{ doc: CvDocument }>()
+const props = defineProps<{ doc: CvDocument }>()
 
-function hasItems(items: Item[]) {
-  return items.some(item => item.label.trim() || item.detail.trim())
+const layoutConfig = computed(() => getLayout(props.doc.layout))
+const visibleContacts = computed(() => props.doc.contacts.filter(entry => entry.value.trim()))
+
+function isExternalUrl(url: string | undefined): boolean {
+  return Boolean(url && /^https?:/i.test(url))
 }
 </script>
 
@@ -13,109 +20,76 @@ function hasItems(items: Item[]) {
   <article class="cv" :class="`cv--${doc.layout}`" :style="{ '--experience-size': `${doc.experienceFontSize}pt` }" aria-label="CV preview">
     <!-- Candidate identity area: photo, full name, and professional title. -->
     <header class="cv-header">
-      <img v-if="doc.photo" :src="doc.photo" :alt="doc.name ? `Portrait of ${doc.name}` : 'Portrait'" class="cv-photo">
+      <img v-if="doc.photo" :src="doc.photo" :alt="doc.name.trim() ? `Portrait of ${doc.name.trim()}` : 'Portrait'" class="cv-photo">
       <div>
-        <h1>{{ doc.name || 'Your name' }}</h1>
-        <p v-if="doc.title" class="cv-role">{{ doc.title }}</p>
+        <h1>
+          <template v-if="doc.name.trim()">{{ doc.name }}</template>
+          <span v-else class="cv-placeholder">Your name</span>
+        </h1>
+        <p v-if="doc.title.trim()" class="cv-role">{{ doc.title }}</p>
       </div>
     </header>
 
     <!-- Main CV columns. Timeline uses the sidebar as a rail; ATS collapses both columns. -->
     <div class="cv-content">
-      <!-- Left column: contact details plus layout-specific education, skills, and languages. -->
+      <!-- Left column: sections ordered by the active layout definition. -->
       <aside class="cv-sidebar">
-        <section v-if="doc.contacts.some(contact => contact.value.trim())" class="cv-section">
-          <h2 v-if="doc.layout !== 'timeline'">{{ doc.headings.contact }}</h2>
-          <ul class="plain-list">
-            <li v-for="contact in doc.contacts.filter(entry => entry.value.trim())" :key="contact.id">
-              <span v-if="contact.label" class="contact-label">{{ contact.label }}: </span>
-              <a v-if="safeUrl(contact.url)" :href="safeUrl(contact.url)">{{ contact.value }}</a>
-              <span v-else>{{ contact.value }}</span>
-            </li>
-          </ul>
-        </section>
-        <template v-if="doc.layout === 'timeline'">
-          <section v-if="hasItems(doc.skills)" class="cv-section">
-            <h2>{{ doc.headings.skills }}</h2>
+        <template v-for="section in layoutConfig.sidebarSections" :key="section">
+          <section v-if="section === 'contacts' && visibleContacts.length" class="cv-section">
+            <h2 v-if="layoutConfig.showContactHeading && doc.headings.contact.trim()">{{ doc.headings.contact }}</h2>
             <ul class="plain-list">
-              <li v-for="entry in doc.skills.filter(entry => entry.label.trim() || entry.detail.trim())" :key="entry.id">
-                {{ entry.label }}<span v-if="entry.detail"> - {{ entry.detail }}</span>
+              <li v-for="contact in visibleContacts" :key="contact.id">
+                <span v-if="contact.label.trim()" class="contact-label">{{ contact.label }}: </span>
+                <a
+                  v-if="safeUrl(contact.url)"
+                  :href="safeUrl(contact.url)"
+                  :target="isExternalUrl(safeUrl(contact.url)) ? '_blank' : undefined"
+                  :rel="isExternalUrl(safeUrl(contact.url)) ? 'noopener noreferrer' : undefined"
+                >{{ contact.value }}</a>
+                <span v-else>{{ contact.value }}</span>
               </li>
             </ul>
           </section>
-          <section v-if="hasItems(doc.languages)" class="cv-section">
-            <h2>{{ doc.headings.languages }}</h2>
-            <ul class="plain-list">
-              <li v-for="entry in doc.languages.filter(entry => entry.label.trim() || entry.detail.trim())" :key="entry.id">
-                {{ entry.label }}<span v-if="entry.detail"> - {{ entry.detail }}</span>
-              </li>
-            </ul>
-          </section>
-        </template>
-        <template v-else>
-          <section v-if="hasItems(doc.education)" class="cv-section">
-            <h2>{{ doc.headings.education }}</h2>
-            <ul class="plain-list">
-              <li v-for="entry in doc.education.filter(entry => entry.label.trim() || entry.detail.trim())" :key="entry.id">
-                <strong>{{ entry.label }}</strong><span v-if="entry.detail" class="item-detail">{{ entry.detail }}</span>
-              </li>
-            </ul>
-          </section>
-          <section v-if="hasItems(doc.languages)" class="cv-section">
-            <h2>{{ doc.headings.languages }}</h2>
-            <ul class="plain-list">
-              <li v-for="entry in doc.languages.filter(entry => entry.label.trim() || entry.detail.trim())" :key="entry.id">
-                {{ entry.label }}<span v-if="entry.detail"> - {{ entry.detail }}</span>
-              </li>
-            </ul>
-          </section>
-          <section v-if="hasItems(doc.skills)" class="cv-section">
-            <h2>{{ doc.headings.skills }}</h2>
-            <ul class="plain-list">
-              <li v-for="entry in doc.skills.filter(entry => entry.label.trim() || entry.detail.trim())" :key="entry.id">
-                {{ entry.label }}<span v-if="entry.detail"> - {{ entry.detail }}</span>
-              </li>
-            </ul>
-          </section>
+          <CvItemList
+            v-else-if="section === 'education'"
+            :heading="doc.headings.education"
+            :items="doc.education"
+            variant="stacked"
+          />
+          <CvItemList
+            v-else-if="section === 'languages'"
+            :heading="doc.headings.languages"
+            :items="doc.languages"
+          />
+          <CvItemList
+            v-else-if="section === 'skills'"
+            :heading="doc.headings.skills"
+            :items="doc.skills"
+          />
         </template>
       </aside>
 
-      <!-- Main column: profile, experience, and Timeline education. -->
+      <!-- Main column: sections ordered by the active layout definition. -->
       <main class="cv-main">
-        <section v-if="doc.summary.trim()" class="cv-section">
-          <h2 v-if="doc.layout !== 'timeline'">{{ doc.headings.summary }}</h2>
-          <p class="preserve-lines">{{ doc.summary }}</p>
-        </section>
-        <section v-if="doc.experience.some(entry => entry.title || entry.company || entry.dates || entry.description || entry.bullets.some(bullet => bullet.label || bullet.detail))" class="cv-section cv-experience">
-          <h2>{{ doc.headings.experience }}</h2>
-          <div v-for="entry in doc.experience" :key="entry.id" class="experience-entry">
-            <template v-if="doc.layout === 'timeline'">
-              <div class="timeline-role-heading">
-                <h3>{{ entry.title }}</h3>
-                <span v-if="entry.dates">{{ entry.dates }}</span>
-              </div>
-              <p v-if="entry.company" class="experience-meta timeline-company">{{ entry.company }}</p>
-            </template>
-            <template v-else>
-              <h3>{{ entry.title }}</h3>
-              <p class="experience-meta">{{ [entry.company, entry.dates].filter(Boolean).join(' | ') }}</p>
-            </template>
-            <p v-if="entry.description" class="preserve-lines">{{ entry.description }}</p>
-            <ul v-if="entry.bullets.some(bullet => bullet.label || bullet.detail)">
-              <li v-for="bullet in entry.bullets.filter(bullet => bullet.label || bullet.detail)" :key="bullet.id">
-                {{ bullet.label }}<span v-if="bullet.detail"> - {{ bullet.detail }}</span>
-              </li>
-            </ul>
-          </div>
-        </section>
-        <section v-if="doc.layout === 'timeline' && hasItems(doc.education)" class="cv-section cv-education">
-          <h2>{{ doc.headings.education }}</h2>
-          <ul class="plain-list">
-            <li v-for="entry in doc.education.filter(entry => entry.label.trim() || entry.detail.trim())" :key="entry.id">
-              <strong>{{ entry.label }}</strong><span v-if="entry.detail" class="item-detail">{{ entry.detail }}</span>
-            </li>
-          </ul>
-        </section>
+        <template v-for="section in layoutConfig.mainSections" :key="section">
+          <section v-if="section === 'summary' && doc.summary.trim()" class="cv-section">
+            <h2 v-if="layoutConfig.showSummaryHeading && doc.headings.summary.trim()">{{ doc.headings.summary }}</h2>
+            <p class="preserve-lines">{{ doc.summary }}</p>
+          </section>
+          <CvExperienceList
+            v-else-if="section === 'experience'"
+            :heading="doc.headings.experience"
+            :entries="doc.experience"
+            :layout="doc.layout"
+          />
+          <CvItemList
+            v-else-if="section === 'education'"
+            :heading="doc.headings.education"
+            :items="doc.education"
+            variant="stacked"
+            section-class="cv-education"
+          />
+        </template>
       </main>
     </div>
 

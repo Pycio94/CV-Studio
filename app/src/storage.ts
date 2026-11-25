@@ -9,6 +9,12 @@ const backupSchema = z.object({
   original: documentSchema,
 })
 export type CvRecord = { document: CvDocument; original: CvDocument }
+export interface LoadRecordsResult {
+  records: CvRecord[]
+  corruptedCount: number
+}
+
+let dbPromise: Promise<IDBDatabase> | null = null
 
 export function parseBackup(data: unknown): CvRecord {
   const record = backupSchema.safeParse(data)
@@ -29,14 +35,46 @@ export function createBackup(record: CvRecord) {
   }
 }
 
+export function parseStoredRecords(raw: unknown[]): LoadRecordsResult {
+  const records: CvRecord[] = []
+  let corruptedCount = 0
+  for (const entry of raw) {
+    const parsed = recordSchema.safeParse(entry)
+    if (parsed.success) records.push(parsed.data)
+    else corruptedCount++
+  }
+  return { records, corruptedCount }
+}
+
 function openDatabase(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open('cv-studio', 1)
-    request.onupgradeneeded = () => request.result.createObjectStore('documents', { keyPath: 'document.id' })
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error ?? new Error('Could not open local storage.'))
-    request.onblocked = () => reject(new Error('Local storage is blocked by another browser tab.'))
-  })
+  if (typeof indexedDB === 'undefined') {
+    return Promise.reject(new Error('IndexedDB is unavailable.'))
+  }
+  if (!dbPromise) {
+    dbPromise = new Promise((resolve, reject) => {
+      const request = indexedDB.open('cv-studio', 1)
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains('documents')) {
+          request.result.createObjectStore('documents', { keyPath: 'document.id' })
+        }
+      }
+      request.onsuccess = () => {
+        const db = request.result
+        db.onclose = () => { dbPromise = null }
+        db.onversionchange = () => { db.close(); dbPromise = null }
+        resolve(db)
+      }
+      request.onerror = () => {
+        dbPromise = null
+        reject(request.error ?? new Error('Could not open local storage.'))
+      }
+      request.onblocked = () => {
+        dbPromise = null
+        reject(new Error('Local storage is blocked by another browser tab.'))
+      }
+    })
+  }
+  return dbPromise
 }
 
 async function transaction<T>(
@@ -45,19 +83,26 @@ async function transaction<T>(
 ): Promise<T> {
   const db = await openDatabase()
   return new Promise((resolve, reject) => {
-    const tx = db.transaction('documents', mode)
+    let tx: IDBTransaction
+    try {
+      tx = db.transaction('documents', mode)
+    } catch (cause) {
+      dbPromise = null
+      reject(cause)
+      return
+    }
     const request = operation(tx.objectStore('documents'))
     let result: T
     request.onsuccess = () => { result = request.result }
-    tx.oncomplete = () => { db.close(); resolve(result) }
-    tx.onerror = () => { db.close(); reject(tx.error ?? new Error('Local storage failed.')) }
-    tx.onabort = () => { db.close(); reject(tx.error ?? new Error('Local storage was interrupted.')) }
+    tx.oncomplete = () => resolve(result)
+    tx.onerror = () => reject(tx.error ?? new Error('Local storage failed.'))
+    tx.onabort = () => reject(tx.error ?? new Error('Local storage was interrupted.'))
   })
 }
 
-export async function loadRecords(): Promise<CvRecord[]> {
-  const records = await transaction('readonly', store => store.getAll())
-  return z.array(recordSchema).parse(records)
+export async function loadRecords(): Promise<LoadRecordsResult> {
+  const raw = await transaction('readonly', store => store.getAll())
+  return parseStoredRecords(raw)
 }
 
 export async function saveRecord(record: CvRecord): Promise<void> {

@@ -1,23 +1,37 @@
 <script setup lang="ts">
+import { moveEntry, removeEntry } from './listUtils'
 import { newItem, type Item } from './model'
 
-const props = defineProps<{
-  items: Item[]
+const items = defineModel<Item[]>('items', { required: true })
+
+const props = withDefaults(defineProps<{
   label: string
   detailLabel: string
-}>()
+  maxItems?: number
+}>(), {
+  maxItems: 100,
+})
 
 function remove(index: number) {
-  if (window.confirm(`Remove this ${props.label.toLowerCase()}?`)) props.items.splice(index, 1)
+  if (window.confirm(`Remove this ${props.label.toLowerCase()}?`)) {
+    items.value = removeEntry(items.value, index)
+  }
 }
 
 function move(index: number, offset: number) {
-  const target = index + offset
-  if (target < 0 || target >= props.items.length) return
-  const entry = props.items[index]
-  if (!entry) return
-  props.items.splice(index, 1)
-  props.items.splice(target, 0, entry)
+  items.value = moveEntry(items.value, index, offset)
+}
+
+function updateField(index: number, field: 'label' | 'detail', event: Event) {
+  const value = (event.target as HTMLInputElement).value
+  items.value = items.value.map((entry, currentIndex) =>
+    currentIndex === index ? { ...entry, [field]: value } : entry,
+  )
+}
+
+function add() {
+  if (items.value.length >= props.maxItems) return
+  items.value = [...items.value, newItem()]
 }
 </script>
 
@@ -30,9 +44,9 @@ function move(index: number, offset: number) {
         <button type="button" :disabled="index === items.length - 1" :aria-label="`Move ${label} ${index + 1} down`" @click="move(index, 1)">Down</button>
         <button type="button" class="danger" :aria-label="`Remove ${label} ${index + 1}`" @click="remove(index)">Remove</button>
       </div>
-      <label>{{ label }} <input v-model="entry.label" :aria-label="`${label} ${index + 1}`"></label>
-      <label>{{ detailLabel }} <input v-model="entry.detail" :aria-label="`${detailLabel} ${index + 1}`"></label>
+      <label>{{ label }} <input :value="entry.label" maxlength="10000" :aria-label="`${label} ${index + 1}`" @input="updateField(index, 'label', $event)"></label>
+      <label>{{ detailLabel }} <input :value="entry.detail" maxlength="10000" :aria-label="`${detailLabel} ${index + 1}`" @input="updateField(index, 'detail', $event)"></label>
     </div>
-    <button type="button" @click="items.push(newItem())">+ Add {{ label.toLowerCase() }}</button>
+    <button type="button" :disabled="items.length >= maxItems" @click="add">+ Add {{ label.toLowerCase() }}</button>
   </div>
 </template>

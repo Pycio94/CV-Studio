@@ -31,7 +31,7 @@ test('edits, persists, exports, imports and preserves legacy data', async ({ pag
   await expect(page.getByRole('status')).toHaveText('Saved locally')
   await page.reload()
   await expect(page.getByLabel('Full name')).toHaveValue('Edited Example')
-  await expect(page.locator('.preview-panel > .cv h1')).toHaveText('Edited Example')
+  await expect(page.locator('.classic-pages .cv h1')).toHaveText('Edited Example')
 
   await page.getByText('Import, backup and reset').click()
   const download = page.waitForEvent('download')
@@ -41,16 +41,17 @@ test('edits, persists, exports, imports and preserves legacy data', async ({ pag
   await page.getByLabel('Choose original CV HTML').setInputFiles({
     name: 'cv.html', mimeType: 'text/html', buffer: Buffer.from(legacyHtml),
   })
-  await expect(page.locator('.preview-panel > .cv h1')).toHaveText('Fictional Person')
-  await expect(page.locator('.preview-panel > .cv')).toContainText('Example Co')
-  await expect(page.locator('.preview-panel > .cv')).toContainText('JavaScript - 75%')
-  await expect(page.locator('.preview-panel > .cv')).toContainText('English - 80%')
-  await expect(page.locator('.preview-panel > .cv')).toContainText('Example consent.')
-  await expect(page.locator('.preview-panel > .cv img')).toHaveCount(0)
+  await expect(page.locator('.classic-pages .cv h1')).toHaveText('Fictional Person')
+  await expect(page.locator('.classic-pages .cv')).toContainText('Example Co')
+  await expect(page.locator('.classic-pages .cv')).toContainText('JavaScript - 75%')
+  await expect(page.locator('.classic-pages .cv')).toContainText('English - 80%')
+  await expect(page.locator('.classic-pages .cv')).toContainText('Example consent.')
+  await expect(page.locator('.classic-pages .cv img')).toHaveCount(0)
   await expect(page.getByRole('status')).toHaveText('Saved locally')
   await page.reload()
   await page.getByLabel('Choose CV').selectOption({ label: 'Imported CV' })
-  await expect(page.locator('.preview-panel > .cv h1')).toHaveText('Fictional Person')
+  await expect(page.locator('.classic-pages .cv h1')).toHaveText('Fictional Person')
+  await expect(page.getByRole('status')).toHaveText('Saved locally')
 })
 
 test('exports and restores the edited CV with its original reset state', async ({ page }) => {
@@ -143,13 +144,13 @@ test('imports text from a PDF into matching CV sections', async ({ page }) => {
   await expect(page.getByLabel('Full name')).toHaveValue('Jordan Example')
   await expect(page.getByLabel('Professional title')).toHaveValue('Senior Product Manager')
   await expect(page.getByLabel('Profile summary')).toHaveValue('Product leader with experience building useful products.')
-  await expect(page.locator('.preview-panel > .cv')).toContainText('jordan@example.com')
-  await expect(page.locator('.preview-panel > .cv')).toContainText('Acme Corp')
-  await expect(page.locator('.preview-panel > .cv')).toContainText('Beta Corp')
-  await expect(page.locator('.preview-panel > .cv .experience-entry')).toHaveCount(2)
-  await expect(page.locator('.preview-panel > .cv')).toContainText('BSc Computer Science')
-  await expect(page.locator('.preview-panel > .cv')).toContainText('Roadmapping')
-  await expect(page.locator('.preview-panel > .cv')).toContainText('English - Fluent')
+  await expect(page.locator('.classic-pages .cv')).toContainText('jordan@example.com')
+  await expect(page.locator('.classic-pages .cv')).toContainText('Acme Corp')
+  await expect(page.locator('.classic-pages .cv')).toContainText('Beta Corp')
+  await expect(page.locator('.classic-pages .cv .experience-entry')).toHaveCount(2)
+  await expect(page.locator('.classic-pages .cv')).toContainText('BSc Computer Science')
+  await expect(page.locator('.classic-pages .cv')).toContainText('Roadmapping')
+  await expect(page.locator('.classic-pages .cv')).toContainText('English - Fluent')
   await expect(page.getByRole('status')).toHaveText('Saved locally')
 })
 
@@ -162,7 +163,6 @@ test('reports when a PDF has no selectable text', async ({ page }) => {
   const pdf = await source.pdf({ format: 'A4' })
   await source.close()
 
-  page.once('dialog', dialog => dialog.accept())
   await page.getByLabel('Choose existing CV PDF').setInputFiles({
     name: 'scanned-cv.pdf',
     mimeType: 'application/pdf',
@@ -208,7 +208,7 @@ test('renders Timeline with contacts in the rail and education in the main colum
   expect(columns.header.right).toBeCloseTo(columns.page.right, 0)
 })
 
-test('keeps Timeline consent at the bottom of the final A4 page', async ({ page }) => {
+test('keeps Timeline consent at the bottom, preserves 10pt print font, and pads Page 2 top', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByRole('status')).toHaveText('Saved locally')
   await page.getByLabel('Layout').selectOption('timeline')
@@ -222,6 +222,12 @@ test('keeps Timeline consent at the bottom of the final A4 page', async ({ page 
   await expect(page.getByRole('status')).toHaveText('Saved locally')
 
   await page.emulateMedia({ media: 'print' })
+  // Verify Timeline keeps 10pt (13.3333px) in print instead of jumping to 10.5pt, and Page 2 has safe top padding
+  await expect(page.locator('.classic-pages .cv--timeline').first()).toHaveCSS('font-size', '13.3333px')
+  const page2MainPaddingTop = await page.locator('.classic-pages .cv--timeline').nth(1).locator('.cv-main')
+    .evaluate(el => parseFloat(getComputedStyle(el).paddingTop))
+  expect(page2MainPaddingTop).toBeGreaterThan(45)
+
   const bytes = await page.pdf({ preferCSSPageSize: true, printBackground: false })
   const loading = getDocument({ data: new Uint8Array(bytes), useSystemFonts: true })
   const pdf = await loading.promise
@@ -320,7 +326,7 @@ test('keeps Classic columns and consent at the bottom of the final A4 page', asy
   await page.reload()
   await page.locator('details').filter({ has: page.locator('summary', { hasText: 'Experience' }) }).locator('summary').click()
   await expect(page.getByLabel('Experience text size')).toHaveValue('9.5')
-  await expect(page.locator('.preview-panel > .cv .experience-entry')).toHaveCSS('font-size', '12.6667px')
+  await expect(page.locator('.classic-pages .cv .experience-entry')).toHaveCSS('font-size', '12.6667px')
 
   async function pdfPages() {
     const bytes = await page.pdf({ preferCSSPageSize: true, printBackground: false })
@@ -382,6 +388,7 @@ test('keeps Classic columns and consent at the bottom of the final A4 page', asy
       leftOverflow: left.scrollHeight - left.clientHeight,
       rightOverflow: right.scrollHeight - right.clientHeight,
       footerGap: footer ? page.getBoundingClientRect().bottom - footer.getBoundingClientRect().bottom : null,
+      emptyShells: page.querySelectorAll('li:empty, h2:empty, h3:empty').length,
     }
   }))
   expect(geometry).toHaveLength(longPages.length)
@@ -390,6 +397,7 @@ test('keeps Classic columns and consent at the bottom of the final A4 page', asy
     expect(Math.abs(rect.leftBottom - rect.rightBottom)).toBeLessThan(1)
     expect(rect.leftOverflow).toBeLessThanOrEqual(0)
     expect(rect.rightOverflow).toBeLessThanOrEqual(0)
+    expect(rect.emptyShells).toBe(0)
   }
   expect(Math.abs(geometry.at(-1)!.footerGap!)).toBeLessThan(1)
 })
@@ -502,10 +510,10 @@ test('rejects invalid imports without replacing the current CV', async ({ page }
     name: 'invalid.json', mimeType: 'application/json', buffer: Buffer.from('{"version":99}'),
   })
   await expect(page.getByRole('alert')).toContainText('Import failed')
-  await expect(page.locator('.preview-panel > .cv h1')).toHaveText('Alex Morgan')
+  await expect(page.locator('.classic-pages .cv h1')).toHaveText('Alex Morgan')
 })
 
-test('blocks printing rather than clipping an oversized sidebar or consent', async ({ page }) => {
+test('blocks oversized consent while flowing a long left column across A4 pages', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByRole('status')).toHaveText('Saved locally')
   await page.getByText('Section headings and consent').click()
@@ -514,12 +522,12 @@ test('blocks printing rather than clipping an oversized sidebar or consent', asy
   await expect(page.getByRole('alert')).toContainText('consent statement is too long')
   await expect(page.getByRole('button', { name: 'Print', exact: true })).toBeDisabled()
   await page.getByLabel('Include consent statement').uncheck()
+  await expect(page.getByRole('button', { name: 'Print', exact: true })).toBeEnabled()
+
   await page.locator('details').filter({ has: page.locator('summary', { hasText: 'Contact details' }) }).locator('summary').click()
   await page.getByLabel('Value', { exact: true }).nth(1).fill('x'.repeat(8000))
-  await expect(page.getByRole('alert')).toContainText('left column is too long')
-  await expect(page.getByRole('button', { name: 'Save as PDF' })).toBeDisabled()
-  await page.getByLabel('Value', { exact: true }).nth(1).fill('Example City')
-  await expect(page.getByRole('button', { name: 'Print', exact: true })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Save as PDF' })).toBeEnabled()
+  await expect.poll(() => page.locator('.classic-sheet').count()).toBeGreaterThan(1)
 })
 
 test('preserves the classic header background in PDF without changing ATS', async ({ page }) => {
@@ -568,9 +576,9 @@ test('preserves the classic consent background in preview and PDF', async ({ pag
   await page.getByText('Section headings and consent').click()
   await page.getByLabel('Consent statement', { exact: true }).fill('Example consent.')
   await page.getByLabel('Include consent statement').check()
-  const consent = page.locator('.preview-panel > .cv .cv-consent')
-  await expect(consent).toHaveCSS('background-color', 'rgb(0, 49, 71)')
-  await expect(consent).toHaveCSS('color', 'rgb(255, 255, 255)')
+  const classicConsent = page.locator('.classic-pages .cv .cv-consent')
+  await expect(classicConsent).toHaveCSS('background-color', 'rgb(234, 242, 245)')
+  await expect(classicConsent).toHaveCSS('color', 'rgb(25, 43, 54)')
 
   await page.emulateMedia({ media: 'print' })
   for (const printBackground of [false, true]) {
@@ -588,14 +596,15 @@ test('preserves the classic consent background in preview and PDF', async ({ pag
       const content = await pdfPage.getTextContent()
       text += content.items.map(item => 'str' in item ? item.str : '').join(' ')
     }
-    expect(colors).toContain('#003147')
+    expect(colors).toContain('#eaf2f5')
     expect(text).toContain('Example consent.')
     await loading.destroy()
   }
   await page.emulateMedia({ media: 'screen' })
   await page.getByLabel('Layout').selectOption('ats')
-  await expect(consent).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
-  await expect(consent).toHaveCSS('color', 'rgb(25, 43, 54)')
+  const atsConsent = page.locator('.preview-panel > .cv .cv-consent')
+  await expect(atsConsent).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+  await expect(atsConsent).toHaveCSS('color', 'rgb(25, 43, 54)')
 })
 
 test('does not request remote resources in imported HTML', async ({ page }) => {
@@ -611,7 +620,7 @@ test('does not request remote resources in imported HTML', async ({ page }) => {
     mimeType: 'text/html',
     buffer: Buffer.from(legacyHtml.replace('<div class="container">', '<div class="container"><img src="https://example.invalid/track.png">')),
   })
-  await expect(page.locator('.preview-panel > .cv h1')).toHaveText('Fictional Person')
+  await expect(page.locator('.classic-pages .cv h1')).toHaveText('Fictional Person')
   await page.waitForTimeout(300)
   expect(unexpected).toEqual([])
 })
@@ -628,7 +637,18 @@ test('backs up photos and supports duplicate, reset, and print actions', async (
   })
   await expect(page.getByRole('status')).toHaveText('Saved locally')
   await page.reload()
-  await expect(page.locator('.preview-panel > .cv img')).toHaveAttribute('alt', 'Portrait of Alex Morgan')
+  await expect(page.locator('.classic-pages .cv img')).toHaveAttribute('alt', 'Portrait of Alex Morgan')
+  await expect(page.locator('.photo-preview')).toHaveCount(1)
+
+  // Verify portrait stays square even with a very long candidate name
+  await page.getByLabel('Full name').fill('Alexandria Maximilian Bartholomew-Montgomery-Smythe')
+  await expect(page.locator('.classic-pages .cv h1')).toContainText('Alexandria')
+  const photoBox = await page.locator('.classic-pages .cv .cv-photo').boundingBox()
+  expect(photoBox).not.toBeNull()
+  expect(Math.abs(photoBox!.width - photoBox!.height)).toBeLessThan(1)
+  await page.getByLabel('Full name').fill('Alex Morgan')
+  await expect(page.getByRole('status')).toHaveText('Saved locally')
+
   await page.getByText('Import, backup and reset').click()
   const downloadPromise = page.waitForEvent('download')
   await page.getByRole('button', { name: 'Export JSON' }).click()
@@ -637,10 +657,10 @@ test('backs up photos and supports duplicate, reset, and print actions', async (
   const chunks: Buffer[] = []
   for await (const chunk of stream) chunks.push(Buffer.from(chunk))
   const backup = Buffer.concat(chunks)
-  expect(JSON.parse(backup.toString()).photo).toMatch(/^data:image\/png;base64,/)
+  expect(JSON.parse(backup.toString()).document.photo).toMatch(/^data:image\/png;base64,/)
   page.once('dialog', dialog => dialog.accept())
   await page.getByLabel('Import JSON backup').setInputFiles({ name: 'backup.json', mimeType: 'application/json', buffer: backup })
-  await expect(page.locator('.preview-panel > .cv img')).toHaveCount(1)
+  await expect(page.locator('.classic-pages .cv img')).toHaveCount(1)
   await expect(page.getByRole('status')).toHaveText('Saved locally')
   await page.getByRole('button', { name: 'Duplicate' }).click()
   await expect(page.getByLabel('Choose CV')).toHaveValue(/.+/)
@@ -650,9 +670,23 @@ test('backs up photos and supports duplicate, reset, and print actions', async (
   await page.getByRole('button', { name: 'Reset CV' }).click()
   await expect(page.getByLabel('Full name')).toHaveValue('Alex Morgan')
   await page.getByRole('button', { name: 'Print', exact: true }).click()
-  page.once('dialog', dialog => dialog.accept())
   await page.getByRole('button', { name: 'Save as PDF' }).click()
+  await expect(page.locator('.print-help')).toBeVisible()
   await expect(page.locator('html')).toHaveAttribute('data-print-calls', '2')
+})
+
+test('hides empty entries, blank headings, and dangling item hyphens', async ({ page }) => {
+  await page.goto('/')
+  await expect(page.getByRole('status')).toHaveText('Saved locally')
+  await page.locator('details').filter({ has: page.locator('summary', { hasText: 'Experience' }) }).locator('summary').click()
+  await page.getByRole('button', { name: '+ Add experience' }).click()
+  await expect(page.locator('.classic-pages .cv .experience-entry')).toHaveCount(1)
+
+  await page.locator('details').filter({ has: page.locator('summary', { hasText: 'Skills' }) }).locator('summary').click()
+  await page.getByLabel('Skill 1', { exact: true }).fill('')
+  await page.getByLabel('Detail 1', { exact: true }).fill('TypeScript')
+  await expect(page.locator('.classic-pages .cv .cv-sidebar')).toContainText('TypeScript')
+  await expect(page.locator('.classic-pages .cv .cv-sidebar')).not.toContainText('- TypeScript')
 })
 
 test('reports unavailable local storage without hiding the draft', async ({ page }) => {
@@ -663,6 +697,6 @@ test('reports unavailable local storage without hiding the draft', async ({ page
   await expect(page.getByRole('alert')).toContainText('only in memory')
   await expect(page.getByRole('status')).toHaveText('Not saved')
   await page.getByLabel('Full name').fill('Unsaved draft')
-  await expect(page.locator('.preview-panel > .cv h1')).toHaveText('Unsaved draft')
+  await expect(page.locator('.classic-pages .cv h1')).toHaveText('Unsaved draft')
   await expect(page.getByRole('alert')).toContainText('only in memory')
 })

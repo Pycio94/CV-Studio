@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findColumnSplit } from './pdfImport'
+import { findColumnSplit } from './pdfLayout'
 
 describe('findColumnSplit', () => {
   it('rejects indented text that overlaps across a candidate split', () => {

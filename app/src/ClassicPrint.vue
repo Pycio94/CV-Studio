@@ -18,11 +18,32 @@ interface TextPart {
   end: number
 }
 
+interface TextSpan {
+  start: number
+  end: number
+}
+
 interface TextStream {
   parts: TextPart[]
   graphemes: number[]
   words: number[]
+  headings: TextSpan[]
+  keepTogether: TextSpan[]
   length: number
+}
+
+function spanForElement(parts: TextPart[], element: Element): TextSpan | undefined {
+  let start: number | undefined
+  let end = 0
+  for (const part of parts) {
+    if (element.contains(part.node)) {
+      if (start === undefined) start = part.start
+      end = part.end
+    } else if (start !== undefined) {
+      break
+    }
+  }
+  return start !== undefined && end > start ? { start, end } : undefined
 }
 
 function makeStream(element: Element): TextStream {
@@ -47,28 +68,76 @@ function makeStream(element: Element): TextStream {
       words.push(start + segment.index + segment.segment.length)
     }
   }
-  return { parts, graphemes, words, length }
+
+  const headings: TextSpan[] = []
+  for (const el of element.querySelectorAll('h2')) {
+    const span = spanForElement(parts, el)
+    if (span) headings.push(span)
+  }
+  for (const entry of element.querySelectorAll('.experience-entry')) {
+    const titleEl = entry.querySelector('.timeline-role-heading, h3')
+    const metaEl = entry.querySelector('.experience-meta')
+    const titleSpan = titleEl ? spanForElement(parts, titleEl) : undefined
+    const metaSpan = metaEl ? spanForElement(parts, metaEl) : undefined
+    if (titleSpan && metaSpan) {
+      headings.push({ start: Math.min(titleSpan.start, metaSpan.start), end: Math.max(titleSpan.end, metaSpan.end) })
+    } else if (titleSpan) {
+      headings.push(titleSpan)
+    }
+  }
+
+  const keepTogether: TextSpan[] = []
+  for (const li of element.querySelectorAll('li')) {
+    const span = spanForElement(parts, li)
+    if (span && span.end - span.start <= 400) keepTogether.push(span)
+  }
+  for (const entry of element.querySelectorAll('.experience-entry')) {
+    const span = spanForElement(parts, entry)
+    if (span && span.end - span.start <= 800) keepTogether.push(span)
+  }
+
+  return { parts, graphemes, words, headings, keepTogether, length }
 }
 
-function pointAt(stream: TextStream, offset: number): [Text, number] {
+function pointAt(stream: TextStream, offset: number, preferNext = false): [Text, number] {
   let low = 0
   let high = stream.parts.length - 1
   while (low < high) {
     const mid = Math.floor((low + high) / 2)
-    if (stream.parts[mid]!.end < offset) low = mid + 1
+    const part = stream.parts[mid]!
+    if (preferNext ? part.end <= offset : part.end < offset) low = mid + 1
     else high = mid
   }
   const part = stream.parts[low]!
-  return [part.node, offset - part.start]
+  return [part.node, Math.max(0, Math.min(part.node.data.length, offset - part.start))]
+}
+
+function textBetween(stream: TextStream, start: number, end: number): string {
+  if (end <= start || !stream.parts.length) return ''
+  let result = ''
+  for (const part of stream.parts) {
+    if (part.end <= start) continue
+    if (part.start >= end) break
+    const sliceStart = Math.max(0, start - part.start)
+    const sliceEnd = Math.min(part.node.data.length, end - part.start)
+    result += part.node.data.slice(sliceStart, sliceEnd)
+  }
+  return result
 }
 
 function fragment(stream: TextStream, start: number, end: number): DocumentFragment {
   const range = document.createRange()
-  const [startNode, startOffset] = pointAt(stream, start)
-  const [endNode, endOffset] = pointAt(stream, end)
+  const [startNode, startOffset] = pointAt(stream, start, true)
+  const [endNode, endOffset] = pointAt(stream, end, false)
   range.setStart(startNode, startOffset)
   range.setEnd(endNode, endOffset)
-  return range.cloneContents()
+  const cloned = range.cloneContents()
+  for (const el of Array.from(
+    cloned.querySelectorAll('h2, h3, p, li, ul, section, .experience-entry, .timeline-role-heading'),
+  ).reverse()) {
+    if (!el.textContent?.trim() && !el.querySelector('img')) el.remove()
+  }
+  return cloned
 }
 
 function lastAtMost(values: number[], value: number): number {
@@ -80,6 +149,28 @@ function lastAtMost(values: number[], value: number): number {
     else high = mid
   }
   return low - 1
+}
+
+function adjustSemanticBreak(stream: TextStream, start: number, best: number): number {
+  let snapped = best
+  for (const unit of stream.keepTogether) {
+    if (unit.start > start && unit.start < snapped && snapped < unit.end) {
+      snapped = unit.start
+    }
+  }
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const heading of stream.headings) {
+      if (heading.start > start && heading.start < snapped) {
+        if (snapped <= heading.end || !textBetween(stream, heading.end, snapped).trim()) {
+          snapped = heading.start
+          changed = true
+        }
+      }
+    }
+  }
+  return snapped > start ? snapped : best
 }
 
 function fitFragment(area: HTMLElement, stream: TextStream, start: number): number {
@@ -100,6 +191,7 @@ function fitFragment(area: HTMLElement, stream: TextStream, start: number): numb
   if (best < stream.length) {
     const word = stream.words[lastAtMost(stream.words, best)] ?? start
     if (word > start) best = word
+    best = adjustSemanticBreak(stream, start, best)
   }
   area.replaceChildren(...(best > start ? [fragment(stream, start, best)] : []))
   return best
@@ -114,6 +206,8 @@ function paginate() {
   const footer = original?.querySelector('.cv-consent')
   if (!header || !sidebar || !main) return
   const target = output.value
+  const savedScale = target.style.getPropertyValue('--preview-scale')
+  target.style.setProperty('--preview-scale', '1')
   target.replaceChildren()
 
   try {
@@ -147,12 +241,11 @@ function paginate() {
       }
     }
 
-    function flow(stream: TextStream, selector: string, grow: boolean, firstPageOnly = false): boolean {
+    function flow(stream: TextStream, selector: string, grow: boolean): boolean {
       let offset = 0
       let index = 0
       let emptyPages = 0
       while (offset < stream.length) {
-        if (firstPageOnly && index > 0) return false
         if (index >= pages.length) {
           if (!grow) return false
           addPage()
@@ -181,9 +274,7 @@ function paginate() {
     }
 
     addPage()
-    if (!flow(sidebarStream, '.cv-sidebar', false, true)) {
-      throw new Error('The left column is too long to fit on the first A4 page. Shorten it before printing.')
-    }
+    flow(sidebarStream, '.cv-sidebar', true)
     flow(mainStream, '.cv-main', true)
 
     if (footer) {
@@ -197,14 +288,14 @@ function paginate() {
       }
       putFooter()
       clearColumns()
-      const leftFits = flow(sidebarStream, '.cv-sidebar', false, true)
+      const leftFits = flow(sidebarStream, '.cv-sidebar', false)
       const rightFits = flow(mainStream, '.cv-main', false)
       if (!leftFits || !rightFits) {
         pages[pages.length - 1]!.querySelector('.cv-consent')!.remove()
         addPage()
         putFooter()
         clearColumns()
-        if (!flow(sidebarStream, '.cv-sidebar', false, true) || !flow(mainStream, '.cv-main', false)) {
+        if (!flow(sidebarStream, '.cv-sidebar', false) || !flow(mainStream, '.cv-main', false)) {
           throw new Error('The CV could not be paginated safely. Shorten its content before printing.')
         }
       }
@@ -218,6 +309,9 @@ function paginate() {
     warning.textContent = message
     target.append(warning)
     emit('status', 0, message)
+  } finally {
+    if (savedScale) target.style.setProperty('--preview-scale', savedScale)
+    else target.style.removeProperty('--preview-scale')
   }
 }
 
@@ -239,7 +333,6 @@ onMounted(() => {
           const scale = String(Math.min(1, width / (210 * 96 / 25.4)))
           if (output.value.style.getPropertyValue('--preview-scale') !== scale) {
             output.value.style.setProperty('--preview-scale', scale)
-            schedule()
           }
         })
       }
